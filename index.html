@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="referrer" content="strict-origin-when-cross-origin" />
     <meta name="robots" content="noindex">
-    <title>YT</title>
+    <title>YT 1</title>
 
     <style>
         * {
@@ -28,19 +28,20 @@
             inset: 0;
             width: 100%;
             height: 100%;
+            border: none;
         }
     </style>
 </head>
 
 <body>
-    <div id="player"></div>
-
-    <!-- YouTube Iframe API -->
-    <script src="https://www.youtube.com/iframe_api"></script>
+    <!-- Explicit iframe with allow attribute so Permissions Policy is delegated to YouTube origin.
+         Setting src directly (no YT IFrame API script) ensures the allow attribute is preserved. -->
+    <iframe id="player"
+        allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+        frameborder="0">
+    </iframe>
 
     <script>
-        let player;
-
         const params = new URLSearchParams(window.location.search);
         const videoId = params.get("v");
 
@@ -50,79 +51,86 @@
             throw new Error("Missing videoId");
         }
 
-        const autoplay = params.get("autoplay") || "0";
-        const controls = params.get("controls") || "1";
-        const loop = params.get("loop") || "0";
-        const mute = params.get("mute") || "0";
+        const autoplay   = params.get("autoplay")   || "0";
+        const controls  = params.get("controls")  || "1";
+        const loop      = params.get("loop")      || "0";
+        const mute      = params.get("mute")      || "0";
         const playsinline = params.get("playsinline") || "1";
-        const playlist = params.get("playlist") || videoId;
+        const playlist  = params.get("playlist")  || videoId;
 
         function post(type, data) {
             window.parent.postMessage(
-                {
-                    source: "YT_PROXY",
-                    type,
-                    data,
-                },
+                { source: "YT_PROXY", type, data },
                 "*"
             );
         }
 
-        function onYouTubeIframeAPIReady() {
-            player = new YT.Player("player", {
-                videoId,
-                host: "https://www.youtube-nocookie.com",
-                playerVars: {
-                    autoplay,
-                    controls,
-                    playsinline,
-                    mute,
-                    loop,
-                    playlist: loop === "1" ? playlist : undefined,
-                    modestbranding: 1,
-                    rel: 0,
-                },
-                events: {
-                    onReady: () => {
-                        post("READY");
-                    },
-                    onStateChange: (e) => {
-                        post("STATE_CHANGE", e.data);
-                    },
-                    onError: (e) => {
-                        post("ERROR", e.data);
-                    },
-                },
-            });
+        const player = document.getElementById("player");
+
+        // Build embed URL — enablejsapi=1 makes YouTube send postMessage events natively
+        const qs = new URLSearchParams({
+            autoplay,
+            controls,
+            playsinline,
+            mute,
+            loop,
+            modestbranding: "1",
+            rel: "0",
+            enablejsapi: "1",
+            origin: window.location.origin,
+        });
+        if (loop === "1") {
+            qs.set("playlist", playlist);
         }
 
-        // Receive commands from parent
-        window.addEventListener("message", (event) => {
-            if (!player || !event.data) return;
+        player.src = "https://www.youtube.com/embed/" + videoId + "?" + qs.toString();
 
-            switch (event.data.type) {
-                case "PLAY":
-                    player.playVideo();
-                    break;
-                case "PAUSE":
-                    player.pauseVideo();
-                    break;
-                case "STOP":
-                    player.stopVideo();
-                    break;
-                case "MUTE":
-                    player.mute();
-                    break;
-                case "UNMUTE":
-                    player.unMute();
-                    break;
-                case "SET_VOLUME":
-                    player.setVolume(event.data.value ?? 100);
-                    break;
-                case "SEEK":
-                    player.seekTo(event.data.value ?? 0, true);
-                    break;
+        let isReady = false;
+
+        window.addEventListener("message", function (event) {
+            // ── Messages FROM the YouTube iframe ──────────────────────────
+            if (event.source === player.contentWindow) {
+                var data;
+                try {
+                    data = typeof event.data === "string"
+                        ? JSON.parse(event.data)
+                        : event.data;
+                } catch (e) { return; }
+
+                if (data.event === "onReady") {
+                    isReady = true;
+                    post("READY");
+                } else if (
+                    data.event === "infoDelivery" &&
+                    data.info &&
+                    data.info.playerState !== undefined
+                ) {
+                    post("STATE_CHANGE", data.info.playerState);
+                } else if (data.event === "onError") {
+                    post("ERROR", data.info);
+                }
+                return;
             }
+
+            // ── Commands FROM the parent app ──────────────────────────────
+            if (!isReady || !event.data || !event.data.type) return;
+
+            var func, args;
+            switch (event.data.type) {
+                case "PLAY":      func = "playVideo";   args = [];                         break;
+                case "PAUSE":     func = "pauseVideo";  args = [];                         break;
+                case "STOP":      func = "stopVideo";   args = [];                         break;
+                case "MUTE":      func = "mute";        args = [];                         break;
+                case "UNMUTE":    func = "unMute";      args = [];                         break;
+                case "SET_VOLUME":func = "setVolume";   args = [event.data.value != null ? event.data.value : 100]; break;
+                case "SEEK":      func = "seekTo";      args = [event.data.value != null ? event.data.value : 0, true]; break;
+                default: return;
+            }
+
+            player.contentWindow.postMessage(
+                JSON.stringify({ event: "command", func: func, args: args }),
+                "https://www.youtube.com"
+            );
         });
     </script>
 </body>
