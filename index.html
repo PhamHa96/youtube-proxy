@@ -28,12 +28,13 @@
             inset: 0;
             width: 100%;
             height: 100%;
+            border: none;
         }
     </style>
 </head>
 
 <body>
-    <div id="player"></div>
+    <iframe id="player" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen frameborder="0"></iframe>
 
     <!-- YouTube Iframe API -->
     <script src="https://www.youtube.com/iframe_api"></script>
@@ -57,51 +58,30 @@
         const playsinline = params.get("playsinline") || "1";
         const playlist = params.get("playlist") || videoId;
 
-        // Read origin param if provided by the embedding parent; fall back to '*'
-        let parentOrigin = '*';
-        const originParam = params.get('origin');
-        if (originParam) {
-            try {
-                // origin may be URL-encoded by the embedder
-                const decoded = decodeURIComponent(originParam);
-                // validate it's an origin-like URL
-                const u = new URL(decoded);
-                parentOrigin = u.origin;
-            } catch (err) {
-                // ignore invalid origin
-                parentOrigin = '*';
-            }
-        }
-
         function post(type, data) {
-            // prefer explicit origin if available
-            window.parent.postMessage({
-                source: "YT_PROXY",
-                type,
-                data,
-            }, parentOrigin);
+            window.parent.postMessage(
+                {
+                    source: "YT_PROXY",
+                    type,
+                    data,
+                },
+                "*"
+            );
         }
 
         function onYouTubeIframeAPIReady() {
-            const playerVars = {
-                autoplay,
-                controls,
-                playsinline,
-                mute,
-                loop,
-                playlist: loop === "1" ? playlist : undefined,
-                modestbranding: 1,
-                rel: 0,
-            };
-
-            // Pass origin to playerVars when available to help YouTube accept embedding origin
-            if (parentOrigin && parentOrigin !== '*') {
-                playerVars.origin = parentOrigin;
-            }
-
             player = new YT.Player("player", {
                 videoId,
-                playerVars,
+                playerVars: {
+                    autoplay,
+                    controls,
+                    playsinline,
+                    mute,
+                    loop,
+                    playlist: loop === "1" ? playlist : undefined,
+                    modestbranding: 1,
+                    rel: 0,
+                },
                 events: {
                     onReady: () => {
                         post("READY");
@@ -118,8 +98,6 @@
 
         // Receive commands from parent
         window.addEventListener("message", (event) => {
-            // If we have a validated parentOrigin, ensure messages come from it
-            if (parentOrigin !== '*' && event.origin !== parentOrigin) return;
             if (!player || !event.data) return;
 
             switch (event.data.type) {
