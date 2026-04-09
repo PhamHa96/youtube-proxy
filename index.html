@@ -1,76 +1,130 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <title>HAHA</title>
-    <base href="/" />
-    <meta name="color-scheme" content="light dark" />
-    <meta
-      name="viewport"
-      content="viewport-fit=cover, width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no"
-    />
-    <meta name="format-detection" content="telephone=no" />
-    <meta name="msapplication-tap-highlight" content="no" />
-    <!-- add to homescreen for ios -->
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
-    <script type="text/javascript" charset="utf-8">
-      // Begin NFC
-      let startUpNfcEvent;
-      /**
-       * @readme: Innov@Team: Because AppComponent is loaded after NFC fires event
-       * then we register here
-       */
-      // console.log('%c [NFC] - Starting event', 'background: #008000; color: #FF0000');
-      document.addEventListener("ndef-mime", function (e) {
-        // console.log('%c [NFC] - Found ndef-mime', 'background: #008000; color: #FF0000');
-        startUpNfcEvent = e;
-      }, false);
-      // End NFC
-      document.addEventListener(
-        "deviceready",
-        function () {
-          // Begin NFC
-          if (startUpNfcEvent) {
-            // console.log('dispatch startUpNfcEvent');
-            document.dispatchEvent(startUpNfcEvent);
-          }
-          // End NFC
-          // Begin Helpscout
-          !(function (e, n) {
-            (window.Beacon = n =
-              function (e, n, d) {
-                window.Beacon.readyQueue.push({
-                  method: e,
-                  options: n,
-                  data: d,
-                });
-              }),
-              (n.readyQueue = []);
-            var t = e.getElementsByTagName("script")[0],
-              o = e.createElement("script");
-            (o.type = "text/javascript"),
-              (o.async = !0),
-              (o.src = "https://beacon-v2.helpscout.net"),
-              t.parentNode.insertBefore(o, t);
-          })(document, window.Beacon || function () {});
-          // End Helpscout
 
-          // Begin CrazyEgg
-          var he = document.getElementsByTagName("head")[0];
-          if (he) {
-            var cSrc = document.createElement("script");
-            cSrc.type = "text/javascript";
-            cSrc.src = "https://script.crazyegg.com/pages/scripts/0120/6807.js";
-            he.appendChild(cSrc);
-          }
-          // End CrazyEgg
-        },
-        false
-      );
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <meta name="robots" content="noindex">
+    <title>YT</title>
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #000;
+        }
+
+        #player {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="player"></div>
+
+    <!-- YouTube Iframe API -->
+    <script src="https://www.youtube.com/iframe_api"></script>
+
+    <script>
+        let player;
+
+        const params = new URLSearchParams(window.location.search);
+        const videoId = params.get("v");
+
+        if (!videoId) {
+            document.body.innerHTML =
+                '<div style="color:white;padding:20px;text-align:center">Missing ?v=VIDEO_ID</div>';
+            throw new Error("Missing videoId");
+        }
+
+        const autoplay = params.get("autoplay") || "0";
+        const controls = params.get("controls") || "1";
+        const loop = params.get("loop") || "0";
+        const mute = params.get("mute") || "0";
+        const playsinline = params.get("playsinline") || "1";
+        const playlist = params.get("playlist") || videoId;
+
+        function post(type, data) {
+            window.parent.postMessage(
+                {
+                    source: "YT_PROXY",
+                    type,
+                    data,
+                },
+                "*"
+            );
+        }
+
+        function onYouTubeIframeAPIReady() {
+            player = new YT.Player("player", {
+                videoId,
+                host: "https://www.youtube-nocookie.com",
+                playerVars: {
+                    autoplay,
+                    controls,
+                    playsinline,
+                    mute,
+                    loop,
+                    playlist: loop === "1" ? playlist : undefined,
+                    modestbranding: 1,
+                    rel: 0,
+                },
+                events: {
+                    onReady: () => {
+                        post("READY");
+                    },
+                    onStateChange: (e) => {
+                        post("STATE_CHANGE", e.data);
+                    },
+                    onError: (e) => {
+                        post("ERROR", e.data);
+                    },
+                },
+            });
+        }
+
+        // Receive commands from parent
+        window.addEventListener("message", (event) => {
+            if (!player || !event.data) return;
+
+            switch (event.data.type) {
+                case "PLAY":
+                    player.playVideo();
+                    break;
+                case "PAUSE":
+                    player.pauseVideo();
+                    break;
+                case "STOP":
+                    player.stopVideo();
+                    break;
+                case "MUTE":
+                    player.mute();
+                    break;
+                case "UNMUTE":
+                    player.unMute();
+                    break;
+                case "SET_VOLUME":
+                    player.setVolume(event.data.value ?? 100);
+                    break;
+                case "SEEK":
+                    player.seekTo(event.data.value ?? 0, true);
+                    break;
+            }
+        });
     </script>
-  </head>
-  <body>
-    <app-root></app-root>
-  </body>
+</body>
+
 </html>
