@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="referrer" content="strict-origin-when-cross-origin" />
     <meta name="robots" content="noindex">
-    <title>YT 1</title>
+    <title>YT</title>
 
     <style>
         * {
@@ -34,16 +34,19 @@
 </head>
 
 <body>
-    <!-- Explicit iframe with allow attribute so Permissions Policy is delegated to YouTube origin.
-         Setting src directly (no YT IFrame API script) ensures the allow attribute is preserved. -->
+    <!--
+        Direct iframe embed — no YouTube IFrame API, no enablejsapi=1.
+        Omitting enablejsapi avoids XPC mode, which causes "cannot parse response"
+        on iOS 16.7.x (WebKit fails to handle the XPC-signed videoplayback responses).
+    -->
     <iframe id="player"
         allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
         frameborder="0">
     </iframe>
 
     <script>
-        const params = new URLSearchParams(window.location.search);
-        const videoId = params.get("v");
+        var params = new URLSearchParams(window.location.search);
+        var videoId = params.get("v");
 
         if (!videoId) {
             document.body.innerHTML =
@@ -51,87 +54,37 @@
             throw new Error("Missing videoId");
         }
 
-        const autoplay   = params.get("autoplay")   || "0";
-        const controls  = params.get("controls")  || "1";
-        const loop      = params.get("loop")      || "0";
-        const mute      = params.get("mute")      || "0";
-        const playsinline = params.get("playsinline") || "1";
-        const playlist  = params.get("playlist")  || videoId;
+        var controls   = params.get("controls")   || "1";
+        var playsinline = params.get("playsinline") || "1";
+        var mute       = params.get("mute")        || "0";
+        var loop       = params.get("loop")        || "0";
+        var playlist   = params.get("playlist")    || videoId;
 
         function post(type, data) {
-            window.parent.postMessage(
-                { source: "YT_PROXY", type, data },
-                "*"
-            );
+            window.parent.postMessage({ source: "YT_PROXY", type: type, data: data }, "*");
         }
 
-        const player = document.getElementById("player");
-
-        // Build embed URL — enablejsapi=1 makes YouTube send postMessage events natively
-        const qs = new URLSearchParams({
-            autoplay,
-            controls,
-            playsinline,
-            mute,
-            loop,
-            modestbranding: "1",
-            rel: "0",
-            enablejsapi: "1",
-            origin: window.location.origin,
+        var qs = new URLSearchParams({
+            controls:    controls,
+            playsinline: playsinline,
+            mute:        mute,
+            loop:        loop,
+            rel:         "0",
         });
-        if (loop === "1") {
-            qs.set("playlist", playlist);
-        }
+        if (loop === "1") qs.set("playlist", playlist);
 
-        player.src = "https://www.youtube.com/embed/" + videoId + "?" + qs.toString();
+        var player = document.getElementById("player");
 
-        let isReady = false;
+        // youtube-nocookie.com + no enablejsapi → no XPC token in videoplayback URLs
+        player.src = "https://www.youtube-nocookie.com/embed/" + videoId + "?" + qs.toString();
 
-        window.addEventListener("message", function (event) {
-            // ── Messages FROM the YouTube iframe ──────────────────────────
-            if (event.source === player.contentWindow) {
-                var data;
-                try {
-                    data = typeof event.data === "string"
-                        ? JSON.parse(event.data)
-                        : event.data;
-                } catch (e) { return; }
-
-                if (data.event === "onReady") {
-                    isReady = true;
-                    post("READY");
-                } else if (
-                    data.event === "infoDelivery" &&
-                    data.info &&
-                    data.info.playerState !== undefined
-                ) {
-                    post("STATE_CHANGE", data.info.playerState);
-                } else if (data.event === "onError") {
-                    post("ERROR", data.info);
-                }
-                return;
-            }
-
-            // ── Commands FROM the parent app ──────────────────────────────
-            if (!isReady || !event.data || !event.data.type) return;
-
-            var func, args;
-            switch (event.data.type) {
-                case "PLAY":      func = "playVideo";   args = [];                         break;
-                case "PAUSE":     func = "pauseVideo";  args = [];                         break;
-                case "STOP":      func = "stopVideo";   args = [];                         break;
-                case "MUTE":      func = "mute";        args = [];                         break;
-                case "UNMUTE":    func = "unMute";      args = [];                         break;
-                case "SET_VOLUME":func = "setVolume";   args = [event.data.value != null ? event.data.value : 100]; break;
-                case "SEEK":      func = "seekTo";      args = [event.data.value != null ? event.data.value : 0, true]; break;
-                default: return;
-            }
-
-            player.contentWindow.postMessage(
-                JSON.stringify({ event: "command", func: func, args: args }),
-                "https://www.youtube.com"
-            );
+        player.addEventListener("load", function () {
+            post("READY");
         });
+
+        // Without enablejsapi=1 there are no postMessage events from YouTube,
+        // so STATE_CHANGE and command forwarding are not available.
+        // The user interacts with YouTube's built-in controls directly.
     </script>
 </body>
 
