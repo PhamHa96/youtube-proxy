@@ -28,25 +28,21 @@
             inset: 0;
             width: 100%;
             height: 100%;
-            border: none;
         }
     </style>
 </head>
 
 <body>
-    <!--
-        Direct iframe embed — no YouTube IFrame API, no enablejsapi=1.
-        Omitting enablejsapi avoids XPC mode, which causes "cannot parse response"
-        on iOS 16.7.x (WebKit fails to handle the XPC-signed videoplayback responses).
-    -->
-    <iframe id="player"
-        allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-        frameborder="0">
-    </iframe>
+    <div id="player"></div>
+
+    <!-- YouTube Iframe API -->
+    <script src="https://www.youtube.com/iframe_api"></script>
 
     <script>
-        var params = new URLSearchParams(window.location.search);
-        var videoId = params.get("v");
+        let player;
+
+        const params = new URLSearchParams(window.location.search);
+        const videoId = params.get("v");
 
         if (!videoId) {
             document.body.innerHTML =
@@ -54,37 +50,95 @@
             throw new Error("Missing videoId");
         }
 
-        var controls   = params.get("controls")   || "1";
-        var playsinline = params.get("playsinline") || "1";
-        var mute       = params.get("mute")        || "0";
-        var loop       = params.get("loop")        || "0";
-        var playlist   = params.get("playlist")    || videoId;
+        const autoplay = params.get("autoplay") || "0";
+        const controls = params.get("controls") || "1";
+        const loop = params.get("loop") || "0";
+        const mute = params.get("mute") || "0";
+        const playsinline = params.get("playsinline") || "1";
+        const playlist = params.get("playlist") || videoId;
+        const playerOrigin =
+            params.get("origin") ||
+            (window.location.protocol === "http:" ||
+            window.location.protocol === "https:"
+                ? window.location.origin
+                : "https://repairsolutions.com");
+        const widgetReferrer = params.get("widget_referrer") || playerOrigin;
 
         function post(type, data) {
-            window.parent.postMessage({ source: "YT_PROXY", type: type, data: data }, "*");
+            window.parent.postMessage(
+                {
+                    source: "YT_PROXY",
+                    type,
+                    data,
+                },
+                "*"
+            );
         }
 
-        var qs = new URLSearchParams({
-            controls:    controls,
-            playsinline: playsinline,
-            mute:        mute,
-            loop:        loop,
-            rel:         "0",
+        function onYouTubeIframeAPIReady() {
+            player = new YT.Player("player", {
+                videoId,
+                host: "https://www.youtube.com",
+                playerVars: {
+                    autoplay,
+                    controls,
+                    playsinline,
+                    mute,
+                    loop,
+                    playlist: loop === "1" ? playlist : undefined,
+                    modestbranding: 1,
+                    rel: 0,
+                    origin: playerOrigin,
+                    widget_referrer: widgetReferrer,
+                },
+                events: {
+                    onReady: () => {
+                        const iframe = document.querySelector("iframe");
+                        if (iframe) {
+                            iframe.referrerPolicy = "strict-origin-when-cross-origin";
+                            iframe.allow =
+                                "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen";
+                        }
+                        post("READY");
+                    },
+                    onStateChange: (e) => {
+                        post("STATE_CHANGE", e.data);
+                    },
+                    onError: (e) => {
+                        post("ERROR", e.data);
+                    },
+                },
+            });
+        }
+
+        // Receive commands from parent
+        window.addEventListener("message", (event) => {
+            if (!player || !event.data) return;
+
+            switch (event.data.type) {
+                case "PLAY":
+                    player.playVideo();
+                    break;
+                case "PAUSE":
+                    player.pauseVideo();
+                    break;
+                case "STOP":
+                    player.stopVideo();
+                    break;
+                case "MUTE":
+                    player.mute();
+                    break;
+                case "UNMUTE":
+                    player.unMute();
+                    break;
+                case "SET_VOLUME":
+                    player.setVolume(event.data.value ?? 100);
+                    break;
+                case "SEEK":
+                    player.seekTo(event.data.value ?? 0, true);
+                    break;
+            }
         });
-        if (loop === "1") qs.set("playlist", playlist);
-
-        var player = document.getElementById("player");
-
-        // youtube-nocookie.com + no enablejsapi → no XPC token in videoplayback URLs
-        player.src = "https://www.youtube-nocookie.com/embed/" + videoId + "?" + qs.toString();
-
-        player.addEventListener("load", function () {
-            post("READY");
-        });
-
-        // Without enablejsapi=1 there are no postMessage events from YouTube,
-        // so STATE_CHANGE and command forwarding are not available.
-        // The user interacts with YouTube's built-in controls directly.
     </script>
 </body>
 
