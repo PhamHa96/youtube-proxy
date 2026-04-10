@@ -40,6 +40,7 @@
 
     <script>
         let player;
+        let hasDirectIframeFallback = false;
 
         const params = new URLSearchParams(window.location.search);
         const videoId = params.get("v");
@@ -63,6 +64,39 @@
                 ? window.location.origin
                 : "https://repairsolutions.com");
         const widgetReferrer = params.get("widget_referrer") || playerOrigin;
+        const parentOrigin = params.get("parent_origin") || "*";
+
+        function buildEmbedUrl() {
+            const embedParams = new URLSearchParams({
+                autoplay,
+                controls,
+                playsinline,
+                mute,
+                rel: "0",
+                modestbranding: "1",
+                origin: playerOrigin,
+                widget_referrer: widgetReferrer,
+                enablejsapi: "1",
+            });
+
+            if (loop === "1") {
+                embedParams.set("loop", "1");
+                embedParams.set("playlist", playlist);
+            }
+
+            return `https://www.youtube.com/embed/${videoId}?${embedParams.toString()}`;
+        }
+
+        function applyIframeAttributes(iframe) {
+            iframe.referrerPolicy = "strict-origin-when-cross-origin";
+            iframe.allow =
+                "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen";
+            iframe.allowFullscreen = true;
+            iframe.setAttribute("allowfullscreen", "true");
+            iframe.setAttribute("webkitallowfullscreen", "true");
+            iframe.setAttribute("playsinline", "true");
+            iframe.setAttribute("frameborder", "0");
+        }
 
         function post(type, data) {
             window.parent.postMessage(
@@ -71,7 +105,7 @@
                     type,
                     data,
                 },
-                "*"
+                parentOrigin
             );
         }
 
@@ -95,9 +129,7 @@
                     onReady: () => {
                         const iframe = document.querySelector("iframe");
                         if (iframe) {
-                            iframe.referrerPolicy = "strict-origin-when-cross-origin";
-                            iframe.allow =
-                                "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen";
+                            applyIframeAttributes(iframe);
                         }
                         post("READY");
                     },
@@ -105,6 +137,31 @@
                         post("STATE_CHANGE", e.data);
                     },
                     onError: (e) => {
+                        if (e.data === 5 && !hasDirectIframeFallback) {
+                            hasDirectIframeFallback = true;
+
+                            const directIframe = document.createElement("iframe");
+                            directIframe.src = buildEmbedUrl();
+                            directIframe.title = "YouTube video player";
+                            directIframe.style.position = "absolute";
+                            directIframe.style.inset = "0";
+                            directIframe.style.width = "100%";
+                            directIframe.style.height = "100%";
+                            applyIframeAttributes(directIframe);
+
+                            const playerContainer = document.getElementById("player");
+                            playerContainer.innerHTML = "";
+                            playerContainer.appendChild(directIframe);
+
+                            post("READY");
+                            post("FALLBACK", {
+                                reason: "PLAYER_ERROR_5",
+                                mode: "DIRECT_IFRAME",
+                                src: directIframe.src,
+                            });
+                            return;
+                        }
+
                         post("ERROR", e.data);
                     },
                 },
